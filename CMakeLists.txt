@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 2.4.3)
+cmake_minimum_required(VERSION 3.2)
 set(CMAKE_ALLOW_LOOSE_LOOP_CONSTRUCTS true)
 cmake_policy(SET CMP0017 NEW)
 #this line has to appear before 'PROJECT' in order to be able to disable incremental linking
@@ -60,14 +60,6 @@ ENDIF(NOT WIN32)
 
 OPTION(USE_MSVC_INCREMENTAL_LINKING "Use MSVC Incremental Linking" OFF)
 
-#statically linking VC++ isn't supported for WindowsPhone/WindowsStore
-IF (CMAKE_SYSTEM_NAME STREQUAL WindowsPhone OR CMAKE_SYSTEM_NAME STREQUAL WindowsStore)
-	OPTION(USE_MSVC_RUNTIME_LIBRARY_DLL "Use MSVC Runtime Library DLL (/MD or /MDd)" ON)
-ELSE ()
-	OPTION(USE_MSVC_RUNTIME_LIBRARY_DLL "Use MSVC Runtime Library DLL (/MD or /MDd)" OFF)
-ENDIF (CMAKE_SYSTEM_NAME STREQUAL WindowsPhone OR CMAKE_SYSTEM_NAME STREQUAL WindowsStore)
-OPTION(USE_MSVC_RELEASE_RUNTIME_ALWAYS "Use MSVC Release Runtime Library even in Debug" OFF)
-
 #SET(CMAKE_EXE_LINKER_FLAGS_INIT    "/STACK:10000000 /INCREMENTAL:NO")
 #SET(CMAKE_EXE_LINKER_FLAGS    "/STACK:10000000 /INCREMENTAL:NO")
 
@@ -96,33 +88,6 @@ IF(MSVC)
 		SET(CMAKE_EXE_LINKER_FLAGS_RELWITHDEBINFO "/INCREMENTAL:NO ${replacementFlags3}" )
 
 	ENDIF (NOT USE_MSVC_INCREMENTAL_LINKING)
-
-	IF (NOT USE_MSVC_RUNTIME_LIBRARY_DLL)
-		#We statically link to reduce dependencies
-		FOREACH(flag_var CMAKE_CXX_FLAGS CMAKE_CXX_FLAGS_DEBUG CMAKE_CXX_FLAGS_RELEASE CMAKE_CXX_FLAGS_MINSIZEREL CMAKE_CXX_FLAGS_RELWITHDEBINFO CMAKE_C_FLAGS CMAKE_C_FLAGS_DEBUG CMAKE_C_FLAGS_RELEASE CMAKE_C_FLAGS_MINSIZEREL CMAKE_C_FLAGS_RELWITHDEBINFO )
-			IF(${flag_var} MATCHES "/MD")
-				STRING(REGEX REPLACE "/MD" "/MT" ${flag_var} "${${flag_var}}")
-			ENDIF(${flag_var} MATCHES "/MD")
-			IF(${flag_var} MATCHES "/MDd")
-				STRING(REGEX REPLACE "/MDd" "/MTd" ${flag_var} "${${flag_var}}")
-			ENDIF(${flag_var} MATCHES "/MDd")
-		ENDFOREACH(flag_var)
-	ENDIF (NOT USE_MSVC_RUNTIME_LIBRARY_DLL)
-
-	IF (USE_MSVC_RELEASE_RUNTIME_ALWAYS)
-		FOREACH(flag_var CMAKE_CXX_FLAGS CMAKE_CXX_FLAGS_DEBUG CMAKE_CXX_FLAGS_RELEASE CMAKE_CXX_FLAGS_MINSIZEREL CMAKE_CXX_FLAGS_RELWITHDEBINFO CMAKE_C_FLAGS CMAKE_C_FLAGS_DEBUG CMAKE_C_FLAGS_RELEASE CMAKE_C_FLAGS_MINSIZEREL CMAKE_C_FLAGS_RELWITHDEBINFO )
-			IF(${flag_var} MATCHES "/MDd")
-				STRING(REGEX REPLACE "/MDd" "/MD" ${flag_var} "${${flag_var}}")
-			ENDIF(${flag_var} MATCHES "/MDd")
-			IF(${flag_var} MATCHES "/MTd")
-				STRING(REGEX REPLACE "/MTd" "/MT" ${flag_var} "${${flag_var}}")
-			ENDIF(${flag_var} MATCHES "/MTd")
-			# Need to remove _DEBUG too otherwise things like _ITERATOR_DEBUG_LEVEL mismatch
-			IF(${flag_var} MATCHES "-D_DEBUG")
-				STRING(REGEX REPLACE "-D_DEBUG" "" ${flag_var} "${${flag_var}}")
-			ENDIF(${flag_var} MATCHES "-D_DEBUG")
-		ENDFOREACH(flag_var)
-	ENDIF (USE_MSVC_RELEASE_RUNTIME_ALWAYS)
 
 	IF (CMAKE_CL_64)
 	  ADD_DEFINITIONS(-D_WIN64)
@@ -442,9 +407,51 @@ IF(BUILD_EXTRAS)
   SUBDIRS(Extras)
 ENDIF(BUILD_EXTRAS)
 
+# Installation (https://github.com/forexample/package-example) {
 
+set(config_install_dir "lib/cmake/bullet")
+set(include_install_dir "include")
 
-SUBDIRS(src)
+set(generated_dir "${CMAKE_CURRENT_BINARY_DIR}/generated")
+
+set(version_config "${generated_dir}/bulletConfigVersion.cmake")
+set(project_config "${generated_dir}/bulletConfig.cmake")
+set(TARGETS_EXPORT_NAME "bulletTargets")
+set(namespace "bullet::")
+
+include(CMakePackageConfigHelpers)
+
+write_basic_package_version_file(
+    "${version_config}"
+    VERSION "${BULLET_VERSION}"
+    COMPATIBILITY SameMajorVersion
+)
+
+# Use variables:
+#   * TARGETS_EXPORT_NAME
+configure_package_config_file(
+    "cmake/Config.cmake.in"
+    "${project_config}"
+    INSTALL_DESTINATION "${config_install_dir}"
+)
+
+install(
+    FILES "${project_config}" "${version_config}"
+    DESTINATION "${config_install_dir}"
+)
+
+install(
+    EXPORT "${TARGETS_EXPORT_NAME}"
+    NAMESPACE "${namespace}"
+    DESTINATION "${config_install_dir}"
+)
+
+# }
+
+set(INCLUDE_INSTALL_DIR "include" CACHE PATH "The subdirectory to the header prefix")
+set(LIB_SUFFIX "" CACHE STRING "Define suffix of directory name (32/64)")
+
+add_subdirectory(src)
 
 IF("${CMAKE_GENERATOR}" MATCHES "Unix Makefiles")
 	OPTION(INSTALL_LIBS "Set when you want to install libraries" ON)
@@ -466,10 +473,8 @@ IF(INSTALL_LIBS)
 		ENDIF (${CMAKE_MAJOR_VERSION}.${CMAKE_MINOR_VERSION} GREATER 2.5)
 	ENDIF(BUILD_EXTRAS)
 
-	SET (LIB_SUFFIX "" CACHE STRING "Define suffix of directory name (32/64)" )
 	SET (LIB_DESTINATION "lib${LIB_SUFFIX}" CACHE STRING "Library directory name")
 	## the following are directories where stuff will be installed to
-	SET(INCLUDE_INSTALL_DIR "include/bullet/" CACHE PATH "The subdirectory to the header prefix")
 	SET(PKGCONFIG_INSTALL_PREFIX "lib${LIB_SUFFIX}/pkgconfig/" CACHE STRING "Base directory for pkgconfig files")
 	IF(NOT MSVC)
 	  CONFIGURE_FILE(${CMAKE_CURRENT_SOURCE_DIR}/bullet.pc.cmake ${CMAKE_CURRENT_BINARY_DIR}/bullet.pc @ONLY)
@@ -488,25 +493,3 @@ IF (BUILD_UNIT_TESTS)
 	ENABLE_TESTING()
 	SUBDIRS(test)
 ENDIF()
-
-set (BULLET_CONFIG_CMAKE_PATH lib${LIB_SUFFIX}/cmake/bullet )
-list (APPEND BULLET_DEFINITIONS ${BULLET_DOUBLE_DEF})
-list (APPEND BULLET_LIBRARIES LinearMath)
-list (APPEND BULLET_LIBRARIES Bullet3Common)
-list (APPEND BULLET_LIBRARIES BulletInverseDynamics)
-list (APPEND BULLET_LIBRARIES BulletCollision)
-list (APPEND BULLET_LIBRARIES BulletDynamics)
-list (APPEND BULLET_LIBRARIES BulletSoftBody)
-set (BULLET_USE_FILE ${BULLET_CONFIG_CMAKE_PATH}/UseBullet.cmake)
-configure_file 	( ${CMAKE_CURRENT_SOURCE_DIR}/BulletConfig.cmake.in
-					${CMAKE_CURRENT_BINARY_DIR}/BulletConfig.cmake
-					@ONLY ESCAPE_QUOTES
-				)
-OPTION(INSTALL_CMAKE_FILES "Install generated CMake files" ON)
-
-IF (INSTALL_CMAKE_FILES)
-	install ( FILES ${CMAKE_CURRENT_SOURCE_DIR}/UseBullet.cmake
-		${CMAKE_CURRENT_BINARY_DIR}/BulletConfig.cmake
-		DESTINATION ${BULLET_CONFIG_CMAKE_PATH}
-	)
-ENDIF (INSTALL_CMAKE_FILES)
